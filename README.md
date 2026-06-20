@@ -2,6 +2,8 @@
 
 macOS 向けのシンプルなネイティブ TODO アプリです。
 
+![スクリーンショット](screenshots/screenshot.png)
+
 ## 機能
 
 - タスクの追加・削除・完了管理
