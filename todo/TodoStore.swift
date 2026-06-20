@@ -8,10 +8,12 @@ final class TodoStore: ObservableObject {
 
     init() { load() }
 
-    func add(title: String, priority: TodoItem.Priority) {
+    func add(title: String, priority: TodoItem.Priority, dueDate: Date? = nil) {
         let trimmed = title.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
-        items.insert(TodoItem(title: trimmed, priority: priority), at: 0)
+        var item = TodoItem(title: trimmed, priority: priority)
+        item.dueDate = dueDate
+        items.insert(item, at: 0)
         save()
     }
 
@@ -26,8 +28,32 @@ final class TodoStore: ObservableObject {
         save()
     }
 
-    var pending: [TodoItem] { items.filter { !$0.isCompleted } }
-    var completed: [TodoItem] { items.filter { $0.isCompleted } }
+    func movePending(from source: IndexSet, to destination: Int) {
+        var ids = pending.map(\.id)
+        ids.move(fromOffsets: source, toOffset: destination)
+        reorder(ids: ids, positions: items.indices.filter { !items[$0].isCompleted })
+    }
+
+    func moveCompleted(from source: IndexSet, to destination: Int) {
+        var ids = completed.map(\.id)
+        ids.move(fromOffsets: source, toOffset: destination)
+        reorder(ids: ids, positions: items.indices.filter { items[$0].isCompleted })
+    }
+
+    var pending: [TodoItem]   { items.filter { !$0.isCompleted } }
+    var completed: [TodoItem] { items.filter {  $0.isCompleted } }
+
+    private func reorder(ids: [UUID], positions: [Int]) {
+        guard ids.count == positions.count else { return }
+        let lookup = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        var newItems = items
+        for (offset, pos) in positions.enumerated() {
+            guard let item = lookup[ids[offset]] else { continue }
+            newItems[pos] = item
+        }
+        items = newItems
+        save()
+    }
 
     private func save() {
         guard let data = try? JSONEncoder().encode(items) else { return }

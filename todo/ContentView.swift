@@ -20,6 +20,17 @@ struct TodoRow: View {
     let onDelete: () -> Void
     @State private var isHovered = false
 
+    private var isOverdue: Bool {
+        guard let due = item.dueDate, !item.isCompleted else { return false }
+        return due < Calendar.current.startOfDay(for: Date())
+    }
+
+    private func dueLabel(_ due: Date) -> String {
+        if Calendar.current.isDateInToday(due)    { return "今日" }
+        if Calendar.current.isDateInTomorrow(due) { return "明日" }
+        return due.formatted(.dateTime.month().day())
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             Button(action: onToggle) {
@@ -32,10 +43,22 @@ struct TodoRow: View {
                 .fill(item.priority.color)
                 .frame(width: 8, height: 8)
 
-            Text(item.title)
-                .strikethrough(item.isCompleted, color: .secondary)
-                .foregroundStyle(item.isCompleted ? Color.secondary : Color.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .strikethrough(item.isCompleted, color: .secondary)
+                    .foregroundStyle(item.isCompleted ? Color.secondary : Color.primary)
+
+                if let due = item.dueDate {
+                    HStack(spacing: 3) {
+                        Image(systemName: isOverdue ? "exclamationmark.circle" : "calendar")
+                            .font(.caption2)
+                        Text(dueLabel(due))
+                            .font(.caption)
+                    }
+                    .foregroundStyle(isOverdue ? Color.red : Color.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             if isHovered {
                 Button(action: onDelete) {
@@ -47,7 +70,7 @@ struct TodoRow: View {
                 .transition(.opacity)
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, item.dueDate != nil ? 4 : 3)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .animation(.easeInOut(duration: 0.15), value: isHovered)
@@ -65,18 +88,48 @@ struct ContentView: View {
     @StateObject private var store = TodoStore()
     @State private var newTitle = ""
     @State private var newPriority: TodoItem.Priority = .medium
+    @State private var newDueDate: Date? = nil
+    @State private var showDatePicker = false
     @State private var showCompleted = true
+    @State private var searchText = ""
+    @State private var priorityFilter: TodoItem.Priority? = nil
     @FocusState private var inputFocused: Bool
+
+    var isFiltering: Bool { !searchText.isEmpty || priorityFilter != nil }
+
+    var filteredPending: [TodoItem] {
+        store.pending.filter { item in
+            (searchText.isEmpty || item.title.localizedCaseInsensitiveContains(searchText))
+                && (priorityFilter == nil || item.priority == priorityFilter)
+        }
+    }
+
+    var filteredCompleted: [TodoItem] {
+        store.completed.filter { item in
+            (searchText.isEmpty || item.title.localizedCaseInsensitiveContains(searchText))
+                && (priorityFilter == nil || item.priority == priorityFilter)
+        }
+    }
+
+    private var hasVisibleItems: Bool {
+        !filteredPending.isEmpty || (showCompleted && !filteredCompleted.isEmpty)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             headerBar
             Divider()
+            searchAndFilterBar
+            Divider()
             listArea
             Divider()
+            if showDatePicker {
+                datePickerBar
+                Divider()
+            }
             inputBar
         }
-        .frame(minWidth: 460, idealWidth: 520, minHeight: 400, idealHeight: 560)
+        .frame(minWidth: 460, idealWidth: 540, minHeight: 440, idealHeight: 600)
     }
 
     // MARK: Header
@@ -105,42 +158,138 @@ struct ContentView: View {
         .padding(.vertical, 10)
     }
 
+    // MARK: Search + Filter
+
+    private var searchAndFilterBar: some View {
+        VStack(spacing: 0) {
+            // Search field
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
+                TextField("検索...", text: $searchText)
+                    .textFieldStyle(.plain)
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+
+            // Priority filter chips
+            HStack(spacing: 6) {
+                filterChip(nil, label: "すべて")
+                ForEach(TodoItem.Priority.allCases, id: \.self) { p in
+                    filterChip(p, label: p.label, color: p.color)
+                }
+                Spacer()
+                if isFiltering {
+                    let count = filteredPending.count + filteredCompleted.count
+                    Text("\(count) 件")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+        }
+    }
+
+    private func filterChip(_ priority: TodoItem.Priority?, label: String, color: Color = .secondary) -> some View {
+        let selected = priorityFilter == priority
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                priorityFilter = selected && priority != nil ? nil : priority
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if priority != nil {
+                    Circle().fill(color).frame(width: 6, height: 6)
+                }
+                Text(label)
+                    .font(.caption.weight(.medium))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                selected ? color.opacity(0.18) : Color.secondary.opacity(0.1),
+                in: Capsule()
+            )
+            .foregroundStyle(selected ? color : Color.secondary)
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: List
 
     @ViewBuilder
     private var listArea: some View {
         if store.items.isEmpty {
             emptyState
+        } else if !hasVisibleItems {
+            noResultsState
         } else {
             List {
-                if !store.pending.isEmpty {
+                if !filteredPending.isEmpty {
                     Section {
-                        ForEach(store.pending) { item in
+                        ForEach(filteredPending) { item in
                             TodoRow(
                                 item: item,
                                 onToggle: { store.toggle(item) },
                                 onDelete: { store.delete(item) }
                             )
                         }
+                        .onMove { source, dest in
+                            guard !isFiltering else { return }
+                            store.movePending(from: source, to: dest)
+                        }
                     } header: {
-                        Text("未完了")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Text("未完了")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            if isFiltering {
+                                Text("(\(filteredPending.count) 件表示)")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
                     }
                 }
-                if showCompleted && !store.completed.isEmpty {
+
+                if showCompleted && !filteredCompleted.isEmpty {
                     Section {
-                        ForEach(store.completed) { item in
+                        ForEach(filteredCompleted) { item in
                             TodoRow(
                                 item: item,
                                 onToggle: { store.toggle(item) },
                                 onDelete: { store.delete(item) }
                             )
                         }
+                        .onMove { source, dest in
+                            guard !isFiltering else { return }
+                            store.moveCompleted(from: source, to: dest)
+                        }
                     } header: {
-                        Text("完了済み")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Text("完了済み")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            if isFiltering {
+                                Text("(\(filteredCompleted.count) 件表示)")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
                     }
                 }
             }
@@ -166,7 +315,54 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: Input
+    private var noResultsState: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 44))
+                .foregroundStyle(.quaternary)
+            Text("該当するタスクがありません")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            Button("検索をクリア") {
+                withAnimation { searchText = ""; priorityFilter = nil }
+            }
+            .foregroundStyle(Color.accentColor)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: Date Picker Bar
+
+    private var datePickerBar: some View {
+        HStack {
+            Text("期限日")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            DatePicker(
+                "",
+                selection: Binding(
+                    get: { newDueDate ?? Date() },
+                    set: { newDueDate = $0 }
+                ),
+                displayedComponents: .date
+            )
+            .labelsHidden()
+            Spacer()
+            if newDueDate != nil {
+                Button("クリア") {
+                    newDueDate = nil
+                }
+                .foregroundStyle(.secondary)
+                .font(.callout)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: Input Bar
 
     private var inputBar: some View {
         HStack(spacing: 8) {
@@ -184,6 +380,16 @@ struct ContentView: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($inputFocused)
                 .onSubmit(addTodo)
+
+            Button {
+                withAnimation { showDatePicker.toggle() }
+            } label: {
+                Image(systemName: newDueDate != nil ? "calendar.badge.checkmark" : "calendar")
+                    .font(.body)
+                    .foregroundStyle(newDueDate != nil ? Color.accentColor : Color.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(newDueDate.map { "期限日: \($0.formatted(.dateTime.month().day()))" } ?? "期限日を設定")
 
             Button(action: addTodo) {
                 Image(systemName: "plus.circle.fill")
@@ -206,8 +412,10 @@ struct ContentView: View {
     private func addTodo() {
         let title = newTitle.trimmingCharacters(in: .whitespaces)
         guard !title.isEmpty else { return }
-        store.add(title: title, priority: newPriority)
+        store.add(title: title, priority: newPriority, dueDate: newDueDate)
         newTitle = ""
+        newDueDate = nil
+        showDatePicker = false
         inputFocused = true
     }
 }

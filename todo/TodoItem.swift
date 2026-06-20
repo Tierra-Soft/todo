@@ -6,6 +6,7 @@ struct TodoItem: Identifiable, Codable, Equatable {
     var isCompleted = false
     var priority: Priority = .medium
     var createdAt = Date()
+    var dueDate: Date? = nil
 
     enum Priority: String, Codable, CaseIterable {
         case high, medium, low
