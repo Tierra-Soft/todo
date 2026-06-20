@@ -103,7 +103,7 @@ struct TodoRow: View {
                     .foregroundStyle(isOverdue ? Color.red : Color.secondary)
                 }
 
-                if !item.isCompleted && item.progress > 0 {
+                if !item.isCompleted {
                     Button {
                         showProgressPopover = true
                     } label: {
