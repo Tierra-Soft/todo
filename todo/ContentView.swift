@@ -12,13 +12,58 @@ extension TodoItem.Priority {
     }
 }
 
+// MARK: - ProgressEditorView
+
+struct ProgressEditorView: View {
+    @Binding var progress: Int
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("進捗")
+                    .font(.headline)
+                Spacer()
+                Text("\(progress)%")
+                    .font(.title2.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(Color.accentColor)
+                    .contentTransition(.numericText())
+                    .animation(.easeInOut(duration: 0.1), value: progress)
+            }
+
+            Slider(value: Binding(
+                get: { Double(progress) },
+                set: { progress = Int($0) }
+            ), in: 0...100, step: 5)
+
+            HStack(spacing: 8) {
+                ForEach([25, 50, 75, 100], id: \.self) { v in
+                    Button("\(v)%") { progress = v }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(progress == v ? Color.accentColor : nil)
+                }
+                Spacer()
+                Button("クリア") { progress = 0 }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
+            }
+        }
+        .padding(16)
+        .frame(width: 260)
+    }
+}
+
 // MARK: - TodoRow
 
 struct TodoRow: View {
     let item: TodoItem
     let onToggle: () -> Void
     let onDelete: () -> Void
+    let onProgressChange: (Int) -> Void
     @State private var isHovered = false
+    @State private var showProgressPopover = false
 
     private var isOverdue: Bool {
         guard let due = item.dueDate, !item.isCompleted else { return false }
@@ -57,6 +102,38 @@ struct TodoRow: View {
                     }
                     .foregroundStyle(isOverdue ? Color.red : Color.secondary)
                 }
+
+                if !item.isCompleted && item.progress > 0 {
+                    Button {
+                        showProgressPopover = true
+                    } label: {
+                        HStack(spacing: 5) {
+                            Capsule()
+                                .fill(Color.secondary.opacity(0.18))
+                                .frame(height: 4)
+                                .overlay(alignment: .leading) {
+                                    GeometryReader { geo in
+                                        Capsule()
+                                            .fill(Color.accentColor.opacity(0.75))
+                                            .frame(width: geo.size.width * CGFloat(item.progress) / 100)
+                                    }
+                                }
+                            Text("\(item.progress)%")
+                                .font(.caption2)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showProgressPopover) {
+                        ProgressEditorView(
+                            progress: Binding(
+                                get: { item.progress },
+                                set: { onProgressChange($0) }
+                            )
+                        )
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -76,6 +153,9 @@ struct TodoRow: View {
         .animation(.easeInOut(duration: 0.15), value: isHovered)
         .contextMenu {
             Button(item.isCompleted ? "未完了に戻す" : "完了にする", action: onToggle)
+            if !item.isCompleted {
+                Button("進捗を設定...") { showProgressPopover = true }
+            }
             Divider()
             Button("削除", role: .destructive, action: onDelete)
         }
@@ -245,7 +325,8 @@ struct ContentView: View {
                             TodoRow(
                                 item: item,
                                 onToggle: { store.toggle(item) },
-                                onDelete: { store.delete(item) }
+                                onDelete: { store.delete(item) },
+                                onProgressChange: { store.updateProgress(item, progress: $0) }
                             )
                         }
                         .onMove { source, dest in
@@ -272,7 +353,8 @@ struct ContentView: View {
                             TodoRow(
                                 item: item,
                                 onToggle: { store.toggle(item) },
-                                onDelete: { store.delete(item) }
+                                onDelete: { store.delete(item) },
+                                onProgressChange: { store.updateProgress(item, progress: $0) }
                             )
                         }
                         .onMove { source, dest in

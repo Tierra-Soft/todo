@@ -23,6 +23,12 @@ final class TodoStore: ObservableObject {
         save()
     }
 
+    func updateProgress(_ item: TodoItem, progress: Int) {
+        guard let i = items.firstIndex(where: { $0.id == item.id }) else { return }
+        items[i].progress = max(0, min(100, progress))
+        save()
+    }
+
     func delete(_ item: TodoItem) {
         items.removeAll { $0.id == item.id }
         save()
